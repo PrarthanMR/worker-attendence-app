@@ -1,24 +1,26 @@
 import { useEffect, useState } from 'react';
-import { CalendarCheck2, ClipboardList, Coffee, LayoutDashboard, UsersRound, Wallet } from 'lucide-react';
+import { CalendarCheck2, ClipboardList, Coffee, Database, LayoutDashboard, UsersRound, Wallet } from 'lucide-react';
 import DashboardPage from './pages/DashboardPage';
 import AttendancePage from './pages/AttendancePage';
 import WorkersPage from './pages/WorkersPage';
 import WagesPage from './pages/WagesPage';
 import HistoryPage from './pages/HistoryPage';
+import BackupPage from './pages/BackupPage';
 import { AppProvider, useApp } from './context/AppContext';
 import type { ViewName } from './types';
 
-const navigation: { view: ViewName; label: 'dashboard' | 'attendance' | 'workers' | 'wages' | 'history'; mobileLabel: 'navHome' | 'navMark' | 'navWorkers' | 'navWages' | 'navHistory'; icon: typeof LayoutDashboard }[] = [
+const navigation: { view: ViewName; label: 'dashboard' | 'attendance' | 'workers' | 'wages' | 'history' | 'backupNav'; mobileLabel: 'navHome' | 'navMark' | 'navWorkers' | 'navWages' | 'navHistory' | 'navBackup'; icon: typeof LayoutDashboard }[] = [
   { view: 'dashboard', label: 'dashboard', mobileLabel: 'navHome', icon: LayoutDashboard },
   { view: 'attendance', label: 'attendance', mobileLabel: 'navMark', icon: CalendarCheck2 },
   { view: 'workers', label: 'workers', mobileLabel: 'navWorkers', icon: UsersRound },
   { view: 'wages', label: 'wages', mobileLabel: 'navWages', icon: Wallet },
   { view: 'history', label: 'history', mobileLabel: 'navHistory', icon: ClipboardList },
+  { view: 'backup', label: 'backupNav', mobileLabel: 'navBackup', icon: Database },
 ];
 
 function TrackerApp() {
   const [view, setView] = useState<ViewName>('dashboard');
-  const { language, setLanguage, t, message, setMessage } = useApp();
+  const { language, setLanguage, t, message, setMessage, persistenceError, savedOnDevice } = useApp();
 
   useEffect(() => {
     if (!message) return;
@@ -51,7 +53,7 @@ function TrackerApp() {
             </button>
           ))}
         </nav>
-        <div className="sidebar-note"><span className="note-dot" />{t('demoNotice')}</div>
+        <div className="sidebar-note"><span className="note-dot" />{t('localDataNotice')}</div>
       </aside>
 
       <div className="main-column">
@@ -62,7 +64,11 @@ function TrackerApp() {
             <button className={language === 'kn' ? 'selected' : ''} aria-pressed={language === 'kn'} onClick={() => setLanguage('kn')}>{t('kannada')}</button>
           </div>
         </header>
-        <div className="demo-banner"><span className="note-dot" />{t('demoNotice')}</div>
+        <div className={`demo-banner ${persistenceError ? 'has-storage-error' : ''}`} role={persistenceError ? 'alert' : undefined}>
+          <span className="note-dot" />
+          <span>{t(persistenceError ?? 'localDataNotice')}</span>
+          {savedOnDevice && <strong className="storage-status">{t('savedOnDevice')}</strong>}
+        </div>
         {message && <div className="toast-message" role="status">{t(message)}</div>}
         <main className="main-content">
           {view === 'dashboard' ? (
@@ -75,6 +81,8 @@ function TrackerApp() {
             <WagesPage />
           ) : view === 'history' ? (
             <HistoryPage navigate={setView} />
+          ) : view === 'backup' ? (
+            <BackupPage />
           ) : (
             <section className="page-stack"><div className="page-heading"><h1>{t(view)}</h1></div></section>
           )}

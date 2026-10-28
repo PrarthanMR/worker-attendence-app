@@ -55,6 +55,10 @@ export default function WorkersPage() {
       setFormError('duplicateWorkerId');
       return;
     }
+    if (result === 'storage-error') {
+      setMessage('storageSaveFailed');
+      return;
+    }
     if (result !== 'success') {
       setFormError('wageInvalid');
       return;
@@ -66,8 +70,8 @@ export default function WorkersPage() {
 
   function updateActiveStatus(worker: Worker) {
     if (!window.confirm(t('confirmDeactivate'))) return;
-    setWorkerActive(worker.id, !worker.active);
-    setMessage('workerStatusUpdated');
+    if (setWorkerActive(worker.id, !worker.active)) setMessage('workerStatusUpdated');
+    else setMessage('storageSaveFailed');
   }
 
   function renderWorker(worker: Worker) {
