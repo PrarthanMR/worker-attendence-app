@@ -5,12 +5,23 @@ A mobile-first demo for tracking coffee estate workers, daily attendance, and we
 ## Run locally
 
 ```sh
-npm install
+npm ci
 npm run dev
 ```
 
-Run the production type-check and build with `npm run build`.
-Run the business-rule tests with `npm test`.
+Run the production type-check and build with `npm run build`. Run the business-rule tests with `npm test`.
+
+## Deploy to Cloudflare Pages
+
+Connect the GitHub repository to Cloudflare Pages and use these build settings:
+
+- Framework preset: Vite
+- Production branch: `main`
+- Build command: `npm run build`
+- Build output directory: `dist`
+- Root directory: `/` (repository root)
+
+No environment variables are required. The app uses in-memory demo data, so changes reset when the page is reloaded. Vite's default root base path is used. The app does not use URL-based client routing, so no SPA fallback rule is needed.
 
 ## Demo features
 

@@ -15,7 +15,11 @@ let getWeekStart;
 let shiftDate;
 
 before(async () => {
-  vite = await createServer({ server: { middlewareMode: true }, appType: 'custom' });
+  vite = await createServer({
+    server: { middlewareMode: true },
+    appType: 'custom',
+    optimizeDeps: { noDiscovery: true, include: [] },
+  });
   const [wages, attendance, payments, workers, dates, i18n] = await Promise.all([
     vite.ssrLoadModule('/src/utils/wages.ts'),
     vite.ssrLoadModule('/src/utils/attendance.ts'),
