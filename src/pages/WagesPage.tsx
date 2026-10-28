@@ -5,9 +5,10 @@ import { getWeekDates, formatDate, formatWeek, getWeekStart, shiftDate } from '.
 import { formatCurrency, formatNumber } from '../utils/format';
 import { calculateWeeklyPaymentTotals } from '../utils/payments';
 import { calculateWeeklyWages, deduplicateAttendanceRecords } from '../utils/wages';
+import { buildWeeklyReportMessage } from '../utils/weeklyReport';
 
 export default function WagesPage() {
-  const { workers, attendance, payments, language, today, weekStart, setWeekStart, togglePayment, t } = useApp();
+  const { workers, attendance, payments, language, today, weekStart, setWeekStart, togglePayment, setMessage, t } = useApp();
   const savedRecords = deduplicateAttendanceRecords(attendance);
   const weeklyRows = calculateWeeklyWages(workers, savedRecords, weekStart);
   const weeklyRecords = savedRecords.filter((record) => getWeekDates(weekStart).includes(record.date));
@@ -21,9 +22,30 @@ export default function WagesPage() {
     ? Math.max(0, workers.filter((worker) => worker.active).length * daysElapsed - savedActiveEntries.size)
     : 0;
   const locale = language === 'kn' ? 'kn-IN' : 'en-IN';
+  const reportMessage = buildWeeklyReportMessage(workers, weeklyRows, payments, weekStart, language);
+  const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(reportMessage)}`;
 
   function changeWeek(offset: number) {
     setWeekStart(shiftDate(weekStart, offset * 7));
+  }
+
+  async function shareWeeklyReport() {
+    if (typeof navigator.share === 'function') {
+      try {
+        await navigator.share({ title: t('weeklyReportTitle'), text: reportMessage });
+        setMessage('shareReportReady');
+        return;
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(reportMessage);
+      setMessage('shareReportCopied');
+    } catch {
+      setMessage('shareReportFailed');
+    }
   }
 
   return (
@@ -37,6 +59,11 @@ export default function WagesPage() {
         <label className="week-picker-label" htmlFor="week-date">{t('week')}</label>
         <input id="week-date" className="date-input" type="date" value={weekStart} onChange={(event) => setWeekStart(getWeekStart(event.target.value))} />
       </section>
+
+      <div className="weekly-share-actions">
+        <button className="button button-primary" onClick={shareWeeklyReport}>{t('shareWeeklyReport')}</button>
+        <a className="button button-secondary whatsapp-link" href={whatsappUrl} target="_blank" rel="noreferrer">{t('openWhatsApp')}</a>
+      </div>
 
       <section className="wage-summary-grid" aria-label={t('totalWages')}>
         <article className="wage-summary-card summary-total"><span>{t('totalWages')}</span><strong>{formatCurrency(paymentTotals.total, language)}</strong></article>
@@ -71,7 +98,7 @@ export default function WagesPage() {
                 <div className="wage-total"><span className="mobile-caption">{t('totalWage')}</span><strong>{formatCurrency(row.totalWage, language)}</strong></div>
                 <div className="wage-payment">
                   <span className={`payment-badge ${isPaid ? 'is-paid' : 'is-unpaid'}`}>{t(isPaid ? 'paid' : 'unpaid')}</span>
-                  <button className={`payment-toggle ${isPaid ? 'marked-paid' : ''}`} aria-label={t(isPaid ? 'markUnpaid' : 'markPaid')} onClick={() => togglePayment(worker.id, weekStart, !isPaid)}>
+                  <button className={`payment-toggle ${isPaid ? 'marked-paid' : ''}`} aria-label={t(isPaid ? 'markUnpaid' : 'markPaid')} onClick={() => setMessage(togglePayment(worker.id, weekStart, !isPaid) ? 'weekPaymentUpdated' : 'storageSaveFailed')}>
                     <HandCoins size={16} aria-hidden="true" /><span>{t(isPaid ? 'markUnpaid' : 'markPaid')}</span>
                   </button>
                 </div>

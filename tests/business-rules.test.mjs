@@ -10,6 +10,13 @@ let setWeeklyPaymentStatus;
 let calculateWeeklyPaymentTotals;
 let saveWorkerRecord;
 let translations;
+let loadPersistedData;
+let savePersistedData;
+let validatePersistedData;
+let archiveAttendanceBefore;
+let createBackup;
+let decodeBackup;
+let buildWeeklyReportMessage;
 let getWeekDates;
 let getWeekStart;
 let shiftDate;
@@ -20,13 +27,16 @@ before(async () => {
     appType: 'custom',
     optimizeDeps: { noDiscovery: true, include: [] },
   });
-  const [wages, attendance, payments, workers, dates, i18n] = await Promise.all([
+  const [wages, attendance, payments, workers, dates, i18n, persistence, backup, weeklyReport] = await Promise.all([
     vite.ssrLoadModule('/src/utils/wages.ts'),
     vite.ssrLoadModule('/src/utils/attendance.ts'),
     vite.ssrLoadModule('/src/utils/payments.ts'),
     vite.ssrLoadModule('/src/utils/workers.ts'),
     vite.ssrLoadModule('/src/utils/dates.ts'),
     vite.ssrLoadModule('/src/i18n/translations.ts'),
+    vite.ssrLoadModule('/src/utils/persistence.ts'),
+    vite.ssrLoadModule('/src/utils/backup.ts'),
+    vite.ssrLoadModule('/src/utils/weeklyReport.ts'),
   ]);
   calculateWeeklyWages = wages.calculateWeeklyWages;
   deduplicateAttendanceRecords = wages.deduplicateAttendanceRecords;
@@ -35,6 +45,13 @@ before(async () => {
   calculateWeeklyPaymentTotals = payments.calculateWeeklyPaymentTotals;
   saveWorkerRecord = workers.saveWorkerRecord;
   translations = i18n.translations;
+  loadPersistedData = persistence.loadPersistedData;
+  savePersistedData = persistence.savePersistedData;
+  validatePersistedData = persistence.validatePersistedData;
+  archiveAttendanceBefore = persistence.archiveAttendanceBefore;
+  createBackup = backup.createBackup;
+  decodeBackup = backup.decodeBackup;
+  buildWeeklyReportMessage = weeklyReport.buildWeeklyReportMessage;
   getWeekDates = dates.getWeekDates;
   getWeekStart = dates.getWeekStart;
   shiftDate = dates.shiftDate;
@@ -173,4 +190,97 @@ test('English and Kannada dictionaries contain the same non-empty labels', () =>
       assert.ok(value.trim().length > 0, `${key} must have a translation`);
     }
   }
+});
+
+test('first launch starts empty and later launches never overwrite saved data', () => {
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+  };
+  const initialData = { schemaVersion: 1, language: 'en', workers: [], attendance: [], archivedAttendance: [], payments: [] };
+
+  const first = loadPersistedData(storage, initialData);
+  assert.equal(first.source, 'initial');
+  assert.deepEqual(first.data.workers, []);
+  assert.equal(first.locked, false);
+
+  const edited = { ...initialData, workers: [baseWorker('user-worker', { name: 'Saved worker' })] };
+  assert.equal(savePersistedData(storage, edited), true);
+  const nextLaunch = loadPersistedData(storage, initialData);
+  assert.equal(nextLaunch.source, 'stored');
+  assert.equal(nextLaunch.data.workers[0].id, 'user-worker');
+});
+
+test('invalid, future-version, unavailable, and unwritable storage fail safely', () => {
+  const corruptText = '{not-json';
+  const corruptStorage = {
+    getItem: () => corruptText,
+    setItem: () => assert.fail('invalid stored data must not be overwritten'),
+  };
+  const seed = { schemaVersion: 1, language: 'en', workers: [], attendance: [], archivedAttendance: [], payments: [] };
+  const corrupt = loadPersistedData(corruptStorage, seed);
+  assert.equal(corrupt.source, 'invalid');
+  assert.equal(corrupt.locked, true);
+
+  assert.deepEqual(validatePersistedData({ ...seed, schemaVersion: 2 }), { valid: false, error: 'unsupported-version' });
+  assert.equal(loadPersistedData(null, seed).error, 'storageUnavailable');
+  assert.equal(savePersistedData({ getItem: () => null, setItem: () => { throw new Error('quota'); } }, seed), false);
+});
+
+test('archiving moves old attendance without deleting wage or payment history', () => {
+  const data = {
+    schemaVersion: 1,
+    language: 'en',
+    workers: [baseWorker('w1')],
+    attendance: [
+      { workerId: 'w1', date: '2026-09-01', status: 'present', wageRate: 550 },
+      { workerId: 'w1', date: '2026-10-27', status: 'half-day', wageRate: 600 },
+    ],
+    archivedAttendance: [],
+    payments: [{ workerId: 'w1', weekStart: '2026-08-31', paid: true }],
+  };
+  const archived = archiveAttendanceBefore(data, '2026-10-01');
+  assert.equal(archived.attendance.length, 1);
+  assert.equal(archived.archivedAttendance[0].wageRate, 550);
+  assert.deepEqual(archived.payments, data.payments);
+  assert.equal(data.workers.length, 1);
+});
+
+test('backup round-trip preserves all data and invalid duplicates are rejected', () => {
+  const data = {
+    schemaVersion: 1,
+    language: 'kn',
+    workers: [baseWorker('w1')],
+    attendance: [{ workerId: 'w1', date: '2026-10-27', status: 'half-day', wageRate: 575 }],
+    archivedAttendance: [{ workerId: 'w1', date: '2026-09-01', status: 'present', wageRate: 525 }],
+    payments: [{ workerId: 'w1', weekStart: '2026-10-26', paid: true }],
+  };
+  const backup = createBackup(data, '2026-10-28T12:00:00.000Z');
+  const decoded = decodeBackup(JSON.stringify(backup));
+  assert.equal(decoded.valid, true);
+  assert.deepEqual({ ...decoded.backup, format: undefined, exportedAt: undefined }, {
+    ...data, format: undefined, exportedAt: undefined,
+  });
+
+  const duplicate = { ...backup, archivedAttendance: [...backup.archivedAttendance, backup.attendance[0]] };
+  assert.deepEqual(decodeBackup(JSON.stringify(duplicate)), { valid: false, error: 'invalid-backup' });
+  assert.deepEqual(decodeBackup('{broken'), { valid: false, error: 'invalid-json' });
+});
+
+test('weekly reports include dates, wage snapshots, payment state, totals, and Kannada strings', () => {
+  const workers = [baseWorker('w1', { name: 'Lakshmi', dailyWage: 999 })];
+  const wages = [{ workerId: 'w1', fullDays: 2, halfDays: 1, equivalentDays: 2.5, totalWage: 1500, wageRates: [600] }];
+  const payments = [{ workerId: 'w1', weekStart: '2026-10-26', paid: true }];
+  const english = buildWeeklyReportMessage(workers, wages, payments, '2026-10-26', 'en');
+  assert.match(english, /26 Oct - 1 Nov 2026/);
+  assert.match(english, /Lakshmi/);
+  assert.match(english, /₹1,500/);
+  assert.match(english, /Paid/);
+  assert.match(english, /Outstanding: ₹0/);
+
+  const kannada = buildWeeklyReportMessage(workers, wages, payments, '2026-10-26', 'kn');
+  assert.match(kannada, /ಕಾಫಿ ಎಸ್ಟೇಟ್ ವಾರದ ಕೂಲಿ ವರದಿ/);
+  assert.match(kannada, /ವಾರದ ಕೂಲಿ ವರದಿ/);
+  assert.match(kannada, /ಪಾವತಿಸಲಾಗಿದೆ/);
 });

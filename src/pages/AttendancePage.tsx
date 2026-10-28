@@ -51,6 +51,7 @@ export default function AttendancePage() {
     if (result === 'success') setMessage('attendanceSaved');
     else if (result === 'unmarked') setMessage('attendanceIncomplete');
     else if (result === 'no-workers') setMessage('noActiveWorkers');
+    else if (result === 'storage-error') setMessage('storageSaveFailed');
     else setMessage('attendanceSaveError');
   }
 
